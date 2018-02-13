@@ -23,12 +23,13 @@ import DeepFried2 as df
 
 from common import bit2deg, ensemble_biternions, subtractbg, cutout
 
+
 # Distinguish between STRANDS and SPENCER.
 try:
-    from upper_body_detector.msg import UpperBodyDetector
-except ImportError:
     from rwth_perception_people_msgs.msg import UpperBodyDetector
     from spencer_tracking_msgs.msg import TrackedPersons2d, TrackedPersons
+except ImportError:
+    from upper_body_detector.msg import UpperBodyDetector
 
 
 def get_rects(msg, with_depth=False):
@@ -56,7 +57,7 @@ class Predictor(object):
         self.pub_tracks = rospy.Publisher(topic + "/tracks", TrackedPersons, queue_size=3)
 
         # Ugly workaround for "jumps back in time" that the synchronizer sometime does.
-        self.last_stamp = rospy.Time()
+        self.last_stamp = rospy.Time.now()
 
         # Create and load the network.
         netlib = import_module(modelname)
@@ -93,13 +94,13 @@ class Predictor(object):
             subs.append(message_filters.Subscriber(tra3d, TrackedPersons))
             self.listener = TransformListener()
 
-        ts = message_filters.ApproximateTimeSynchronizer(subs, queue_size=5, slop=0.5)
+        ts = message_filters.ApproximateTimeSynchronizer(subs, queue_size=10, slop=10.0)
         ts.registerCallback(self.cb)
 
     def cb(self, src, rgb, d, caminfo, *more):
         # Ugly workaround because approximate sync sometimes jumps back in time.
         if rgb.header.stamp <= self.last_stamp:
-            rospy.logwarn("Jump back in time detected and dropped like it's hot")
+            #rospy.logwarn("Jump back in time detected and dropped like it's hot")
             return
 
         self.last_stamp = rgb.header.stamp
@@ -109,6 +110,7 @@ class Predictor(object):
         # Early-exit to minimize CPU usage if possible.
         #if len(detrects) == 0:
         #    return
+
 
         # If nobody's listening, why should we be computing?
         if 0 == sum(p.get_num_connections() for p in (self.pub, self.pub_vis, self.pub_pa, self.pub_tracks)):
@@ -144,7 +146,8 @@ class Predictor(object):
             self.pub.publish(HeadOrientations(
                 header=header,
                 angles=list(preds),
-                confidences=[0.83] * len(imgs)
+                confidences=[0.83] * len(imgs),
+                ids=list([(p2d.track_id) for p2d in src.boxes])
             ))
 
         # Visualization
@@ -187,7 +190,7 @@ class Predictor(object):
         if len(more) == 1 and 0 < self.pub_tracks.get_num_connections():
             t3d = more[0]
             try:
-                self.listener.waitForTransform(header.frame_id, t3d.header.frame_id, rospy.Time(), rospy.Duration(1))
+                self.listener.waitForTransform(header.frame_id, t3d.header.frame_id, rospy.Time.now(), rospy.Duration(1.0))
                 for track, alpha in zip(t3d.tracks, preds):
                     track.pose.pose.orientation = self.listener.transformQuaternion(t3d.header.frame_id, QuaternionStamped(
                         header=header,
@@ -196,6 +199,7 @@ class Predictor(object):
                     )).quaternion
                 self.pub_tracks.publish(t3d)
             except TFException:
+                print("TFException")
                 pass
 
 
