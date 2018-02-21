@@ -21,7 +21,9 @@ from visualization_msgs.msg import Marker
 
 import DeepFried2 as df
 
-from common import bit2deg, ensemble_biternions, subtractbg, cutout
+from common import deg2bit, bit2deg, ensemble_biternions, subtractbg, cutout
+
+from general_smoother.smoother import Smoother
 
 
 # Distinguish between STRANDS and SPENCER.
@@ -30,6 +32,7 @@ try:
     from spencer_tracking_msgs.msg import TrackedPersons2d, TrackedPersons
 except ImportError:
     from upper_body_detector.msg import UpperBodyDetector
+    from mdl_people_tracker.msg import TrackedPersons2d, TrackedPersons
 
 
 def get_rects(msg, with_depth=False):
@@ -40,11 +43,12 @@ def get_rects(msg, with_depth=False):
     else:
         raise TypeError("Unknown source type: {}".format(type(msg)))
 
-
 class Predictor(object):
     def __init__(self):
-        rospy.loginfo("Initializing biternion predictor")
+        rospy.loginfo("HE-MAN ready!")
         self.counter = 0
+        self.smoother_dict = dict()
+        self.filter_method = 0
 
         modelname = rospy.get_param("~model", "head_50_50")
         weightsname = abspath(expanduser(rospy.get_param("~weights", ".")))
@@ -52,6 +56,7 @@ class Predictor(object):
 
         topic = rospy.get_param("~topic", "/biternion")
         self.pub = rospy.Publisher(topic, HeadOrientations, queue_size=3)
+        self.pub_smooth = rospy.Publisher(topic + "_smoothed", HeadOrientations, queue_size=3)
         self.pub_vis = rospy.Publisher(topic + '/image', ROSImage, queue_size=3)
         self.pub_pa = rospy.Publisher(topic + "/pose", PoseArray, queue_size=3)
         self.pub_tracks = rospy.Publisher(topic + "/tracks", TrackedPersons, queue_size=3)
@@ -106,6 +111,7 @@ class Predictor(object):
         self.last_stamp = rgb.header.stamp
 
         detrects = get_rects(src)
+        t_ids = [(p2d.track_id) for p2d in src.boxes]
 
         # Early-exit to minimize CPU usage if possible.
         #if len(detrects) == 0:
@@ -141,25 +147,75 @@ class Predictor(object):
             # print(preds)
         else:
             preds = []
+        
+        # SMOOTHING
+        fake_confs=[0.1] * len(preds) #TODO: de-fake
+        new_angles = dict(zip(t_ids,list(zip(preds,fake_confs))))
+        smoothed_angles = []
+        smoothed_confs = []
+        old_angles = []
+        old_confs = []
+        for t_id in t_ids:
+            # 1) INIT ALL NEW
+            if t_id not in self.smoother_dict:
+                # new id, start new smoothing
+                new_smoother = Smoother(deg2bit(new_angles[t_id][0]), new_angles[t_id][1], self.filter_method)
+                smoothed_ang, smoothed_conf = new_angles[t_id]
+                smoothed_angles.append(smoothed_ang)
+                smoothed_confs.append(smoothed_conf)
+                self.smoother_dict[t_id] = new_smoother
+                continue
+            old_ang, old_conf = self.smoother_dict[t_id].getCurrentValueAndConfidence()
+            old_ang = bit2deg(np.array([old_ang]))
+            old_angles.append(old_ang)
+            old_confs.append(old_conf)
+            # 2) PREDICT ALL EXISTING
+            self.smoother_dict[t_id].predict()
+            # 3) UPDATE ALL EXISTING
+            self.smoother_dict[t_id].update(deg2bit(new_angles[t_id][0]), new_angles[t_id][1])
+            # 4) DELETE ALL OLD
+            # TODO: deletion logic, or just keep all in case they return and predict up to then
 
+            # append result here to keep id_idx
+            smoothed_ang, smoothed_conf = self.smoother_dict[t_id].getCurrentValueAndConfidence()
+            smoothed_ang = bit2deg(np.array([smoothed_ang]))
+            smoothed_angles.append(smoothed_ang)
+            smoothed_confs.append(smoothed_conf)
+
+        # published unsmoothed
         if 0 < self.pub.get_num_connections():
             self.pub.publish(HeadOrientations(
                 header=header,
                 angles=list(preds),
                 confidences=[0.83] * len(imgs),
-                ids=list([(p2d.track_id) for p2d in src.boxes])
+                ids=list(t_ids)
+            ))
+
+        # publish smoothed
+        if 0 < self.pub_smooth.get_num_connections():
+            self.pub_smooth.publish(HeadOrientations(
+                header=header,
+                angles=list(smoothed_angles),
+                confidences=list(smoothed_confs),
+                ids = list(t_ids)
             ))
 
         # Visualization
         if 0 < self.pub_vis.get_num_connections():
             rgb_vis = rgb[:,:,::-1].copy()
-            for detrect, alpha in zip(detrects, preds):
+            for detrect, alpha, beta, gamma in zip(detrects, preds, old_angles, smoothed_angles):
                 l, t, w, h = self.getrect(*detrect)
                 px =  int(round(np.cos(np.deg2rad(alpha))*w/2))
                 py = -int(round(np.sin(np.deg2rad(alpha))*h/2))
+                px_old =  int(round(np.cos(np.deg2rad(beta))*w/2))
+                py_old = -int(round(np.sin(np.deg2rad(beta))*h/2))
+                px_smooth =  int(round(np.cos(np.deg2rad(gamma))*w/2))
+                py_smooth = -int(round(np.sin(np.deg2rad(gamma))*h/2))
                 cv2.rectangle(rgb_vis, (detrect[0], detrect[1]), (detrect[0]+detrect[2],detrect[1]+detrect[3]), (0,255,255), 1)
                 cv2.rectangle(rgb_vis, (l,t), (l+w,t+h), (0,255,0), 2)
-                cv2.line(rgb_vis, (l+w//2, t+h//2), (l+w//2+px,t+h//2+py), (0,255,0), 2)
+                cv2.line(rgb_vis, (l+w//2, t+h//2), (l+w//2+px_smooth,t+h//2+py_smooth), (0,255,0), 2)
+                cv2.line(rgb_vis, (l+w//2, t+h//2), (l+w//2+px,t+h//2+py), (255,0,0), 1)
+                cv2.line(rgb_vis, (l+w//2, t+h//2), (l+w//2+px_old,t+h//2+py_old), (0,0,255), 1)
                 # cv2.putText(rgb_vis, "{:.1f}".format(alpha), (l, t+25), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,255), 2)
             vismsg = bridge.cv2_to_imgmsg(rgb_vis, encoding='rgb8')
             vismsg.header = header  # TODO: Seems not to work!
