@@ -10,6 +10,7 @@
     <arg name="rgb" default="/spencer/sensors/rgbd_$(arg cam)_top/rgb/image_raw" />
     <arg name="d" default="/spencer/sensors/rgbd_$(arg cam)_top/depth/image_rect"/>
     <arg name="topic" default="/spencer/perception/orientations" />
+    <arg name="result_path" default="/home/stefan/results/spencer_tracker/anno_seq_03-e1920-2505_results/last_run/" />
 
     <!-- Optional for visualization purposes -->
     <arg name="tra3d" default="/spencer/perception_internal/people_tracking/rgbd_$(arg cam)_top/tracked_persons" />
@@ -24,5 +25,6 @@
         <param name="d" value="$(arg d)" />
         <param name="topic" value="$(arg topic)" />
         <param name="tra3d" value="$(arg tra3d)" />
+        <param name="result_path" value="$(arg result_path)" />
     </node>
 </launch>

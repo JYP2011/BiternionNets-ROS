@@ -2,7 +2,7 @@
 # encoding: utf-8
 
 from os.path import abspath, expanduser, join as pjoin
-import sys
+import os, sys
 from importlib import import_module
 
 import numpy as np
@@ -46,6 +46,16 @@ def get_rects(msg, with_depth=False):
 class Predictor(object):
     def __init__(self):
         rospy.loginfo("HE-MAN ready!")
+
+
+        self.result_path = rospy.get_param("~result_path", "/home/stefan/results/spencer_tracker/anno_seq_03-e1920-2505_results/last_run/") #TODO: de-hc
+        self.do_save_results = os.path.isdir(self.result_path)
+        if self.do_save_results:
+            self.results_file_smoothed = open(pjoin(self.result_path,"heads_smoothed.txt"),'w')
+            self.results_file_orig = open(pjoin(self.result_path,"heads_orig.txt"),'w')
+            self.results_file_smoothed.close()
+            self.results_file_orig.close()
+
         self.counter = 0
         self.smoother_dict = dict()
         self.filter_method = 0
@@ -200,6 +210,19 @@ class Predictor(object):
                 ids = list(t_ids)
             ))
 
+
+        if self.do_save_results:
+            f_s = open(self.results_file_smoothed.name,'a')
+            f_o = open(self.results_file_orig.name,'a')
+            for t_id in t_ids:
+                result_ang, result_conf = self.smoother_dict[t_id].getCurrentValueAndConfidence()
+                result_ang = bit2deg(np.array([result_ang]))
+                f_s.write("{0:d} {1:d} {2:.2f} {3:.2f}\n".format(src.frame_idx, t_id, result_ang[0], result_conf))
+                f_o.write("{0:d} {1:d} {2:.2f} {3:.2f}\n".format(src.frame_idx, t_id, new_angles[t_id][0], new_angles[t_id][1]))
+            f_s.close()
+            f_o.close()
+                
+        
         # Visualization
         if 0 < self.pub_vis.get_num_connections():
             rgb_vis = rgb[:,:,::-1].copy()
