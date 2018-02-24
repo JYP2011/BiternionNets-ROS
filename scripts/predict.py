@@ -18,12 +18,13 @@ from sensor_msgs.msg import Image as ROSImage, CameraInfo
 from geometry_msgs.msg import PoseArray, Pose, Point, Quaternion, QuaternionStamped
 from biternion.msg import HeadOrientations
 from visualization_msgs.msg import Marker
+from approxsync import ApproximateSynchronizer
 
 import DeepFried2 as df
 
 from common import deg2bit, bit2deg, ensemble_biternions, subtractbg, cutout
 
-from general_smoother.smoother import Smoother
+from general_smoother.smoother import Smoother, KalmanFilterParas
 
 
 # Distinguish between STRANDS and SPENCER.
@@ -58,7 +59,7 @@ class Predictor(object):
 
         self.counter = 0
         self.smoother_dict = dict()
-        self.filter_method = 0
+        self.filter_method = 1
 
         modelname = rospy.get_param("~model", "head_50_50")
         weightsname = abspath(expanduser(rospy.get_param("~weights", ".")))
@@ -109,7 +110,10 @@ class Predictor(object):
             subs.append(message_filters.Subscriber(tra3d, TrackedPersons))
             self.listener = TransformListener()
 
-        ts = message_filters.ApproximateTimeSynchronizer(subs, queue_size=10, slop=10.0)
+        syncSlop = rospy.get_param("~sync_slop", 0.2)
+        syncQueueSize = rospy.get_param("~sync_queue_size", 1)
+        #ts = message_filters.ApproximateTimeSynchronizer(subs, queue_size=10, slop=10.0)
+        ts = ApproximateSynchronizer(syncSlop, subs, syncQueueSize)
         ts.registerCallback(self.cb)
 
     def cb(self, src, rgb, d, caminfo, *more):
@@ -169,7 +173,8 @@ class Predictor(object):
             # 1) INIT ALL NEW
             if t_id not in self.smoother_dict:
                 # new id, start new smoothing
-                new_smoother = Smoother(deg2bit(new_angles[t_id][0]), new_angles[t_id][1], self.filter_method)
+                init_dt = 1. #TODO
+                new_smoother = Smoother(deg2bit(new_angles[t_id][0]), new_angles[t_id][1], init_dt=init_dt, filter_method=self.filter_method)
                 smoothed_ang, smoothed_conf = new_angles[t_id]
                 smoothed_angles.append(smoothed_ang)
                 smoothed_confs.append(smoothed_conf)
