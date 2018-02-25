@@ -7,6 +7,7 @@ from importlib import import_module
 
 import numpy as np
 import cv2
+import time
 
 import rospy
 from tf import TransformListener, Exception as TFException
@@ -48,7 +49,6 @@ class Predictor(object):
     def __init__(self):
         rospy.loginfo("HE-MAN ready!")
 
-
         self.result_path = rospy.get_param("~result_path", "/home/stefan/results/spencer_tracker/anno_seq_03-e1920-2505_results/last_run/") #TODO: de-hc
         self.do_save_results = os.path.isdir(self.result_path)
         if self.do_save_results:
@@ -60,6 +60,11 @@ class Predictor(object):
         self.counter = 0
         self.smoother_dict = dict()
         self.filter_method = 0
+        # for timing
+        self.cycle_idx = 0
+        self.hz_curr = 0.0
+        self.hz_sum = 0.0
+        self.hz_mean = 0.0
 
         modelname = rospy.get_param("~model", "head_50_50")
         weightsname = abspath(expanduser(rospy.get_param("~weights", ".")))
@@ -73,7 +78,7 @@ class Predictor(object):
         self.pub_tracks = rospy.Publisher(topic + "/tracks", TrackedPersons, queue_size=3)
 
         # Ugly workaround for "jumps back in time" that the synchronizer sometime does.
-        self.last_stamp = rospy.Time.now()
+        #self.last_stamp = rospy.Time.now()
 
         # Create and load the network.
         netlib = import_module(modelname)
@@ -118,23 +123,26 @@ class Predictor(object):
 
     def cb(self, src, rgb, d, caminfo, *more):
         # Ugly workaround because approximate sync sometimes jumps back in time.
-        if rgb.header.stamp <= self.last_stamp:
+        #if rgb.header.stamp <= self.last_stamp:
             #rospy.logwarn("Jump back in time detected and dropped like it's hot")
-            return
+        #    return
 
-        self.last_stamp = rgb.header.stamp
-
-        detrects = get_rects(src)
-        t_ids = [(p2d.track_id) for p2d in src.boxes]
+        #self.last_stamp = rgb.header.stamp
 
         # Early-exit to minimize CPU usage if possible.
         #if len(detrects) == 0:
         #    return
 
-
         # If nobody's listening, why should we be computing?
         if 0 == sum(p.get_num_connections() for p in (self.pub, self.pub_vis, self.pub_pa, self.pub_tracks)):
             return
+
+        # TIMING START
+        self.cycle_idx += 1
+        cycle_start_time = time.time()
+
+        detrects = get_rects(src)
+        t_ids = [(p2d.track_id) for p2d in src.boxes]
 
         header = rgb.header
         bridge = CvBridge()
@@ -150,7 +158,7 @@ class Predictor(object):
             im = subtractbg(det_rgb, det_d, 1.0, 0.5)
             im = self.preproc(im)
             imgs.append(im)
-            sys.stderr.write("\r{}".format(self.counter)) ; sys.stderr.flush()
+            #sys.stderr.write("\r{}".format(self.counter)) ; sys.stderr.flush()
             self.counter += 1
 
         # TODO: We could further optimize by putting all augmentations in a
@@ -286,6 +294,19 @@ class Predictor(object):
                 print("TFException")
                 pass
 
+        # TIMING END
+        cycle_end_time = time.time()
+        cycle_duration = cycle_end_time - cycle_start_time
+        #rospy.loginfo("Start time %i %i", cycle_start_time.secs, cycle_start_time.nsecs)
+        #rospy.loginfo("End time %i %i", cycle_end_time.secs, cycle_end_time.nsecs)
+        #print(cycle_duration)
+        #rospy.loginfo("Start time %f", cycle_start_time)
+        #rospy.loginfo("End time %f", cycle_end_time)
+        #self.hz_curr = 1/(cycle_duration.to_nsec())
+        self.hz_curr = 1./(cycle_duration)
+        self.hz_sum = self.hz_sum + self.hz_curr
+        self.hz_mean = self.hz_sum/self.cycle_idx
+
 
 if __name__ == "__main__":
     rospy.init_node("biternion_predict")
@@ -297,3 +318,4 @@ if __name__ == "__main__":
     p = Predictor()
     rospy.spin()
     rospy.loginfo("Predicted a total of {} UBDs.".format(p.counter))
+    rospy.loginfo("Mean HZ: {}".format(p.hz_mean))
