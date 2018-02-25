@@ -59,7 +59,7 @@ class Predictor(object):
 
         self.counter = 0
         self.smoother_dict = dict()
-        self.filter_method = 1
+        self.filter_method = 0
 
         modelname = rospy.get_param("~model", "head_50_50")
         weightsname = abspath(expanduser(rospy.get_param("~weights", ".")))
