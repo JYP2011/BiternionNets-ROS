@@ -13,7 +13,8 @@
     <arg name="result_path" default="/fastwork/spencer/results/anno_seq_03-e1920-2505_results/last_run/" />
 
     <!-- Optional for visualization purposes -->
-    <arg name="tra3d" default="/spencer/perception_internal/people_tracking/rgbd_$(arg cam)_top/tracked_persons" />
+    <!-- <arg name="tra3d" default="/spencer/perception_internal/people_tracking/rgbd_$(arg cam)_top/tracked_persons" /> -->
+    <arg name="tra3d" default="" />
 
     <node pkg="biternion" type="predict.py" name="biternion_predict" output="screen" respawn="false">
         <param name="model" value="$(arg model)" />
