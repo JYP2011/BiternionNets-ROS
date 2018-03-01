@@ -12,6 +12,7 @@
     <arg name="topic" default="/spencer/perception/orientations" />
     <arg name="result_path" default="/fastwork/spencer/results/anno_seq_03-e1920-2505_results/last_run/" />
 
+    <arg name="filter" default="GHFilter(g=0.5)"/>
     <arg name="smooth" default="false"/>
     <arg name="stride" default="1"/>
 
@@ -32,5 +33,6 @@
         <param name="result_path" value="$(arg result_path)" />
         <param name="smooth" value="$(arg smooth)"/>
         <param name="stride" value="$(arg stride)"/>
+        <param name="filter" value="$(arg filter)"/>
     </node>
 </launch>

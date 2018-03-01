@@ -25,7 +25,7 @@ import DeepFried2 as df
 
 from common import bit2deg as _bit2deg, ensemble_biternions, subtractbg, cutout
 
-from general_smoother.smoother2 import GHFilter, KalmanFilter, append_each, insert_each
+from general_smoother.smoother2 import *
 
 def bit2deg(bit):
     return _bit2deg(np.array([bit]))[0] - 90
@@ -62,7 +62,8 @@ class Predictor(object):
 
         self.seen_counter = 0
         self.ana_counter = 0
-        self.smoother_dict = defaultdict(lambda: GHFilter(g=0.5)) if rospy.get_param("~smooth", False) else None
+        filtermaker = rospy.get_param("~filter", "GHFilter(g=0.5)")
+        self.smoother_dict = defaultdict(lambda: eval(filtermaker)) if rospy.get_param("~smooth", False) else None
         self.stride = rospy.get_param("~stride", 1)
 
         # for timing
