@@ -12,6 +12,9 @@
     <arg name="topic" default="/spencer/perception/orientations" />
     <arg name="result_path" default="/fastwork/spencer/results/anno_seq_03-e1920-2505_results/last_run/" />
 
+    <arg name="smooth" default="false"/>
+    <arg name="stride" default="1"/>
+
     <!-- Optional for visualization purposes -->
     <!-- <arg name="tra3d" default="/spencer/perception_internal/people_tracking/rgbd_$(arg cam)_top/tracked_persons" /> -->
     <arg name="tra3d" default="" />
@@ -27,5 +30,7 @@
         <param name="topic" value="$(arg topic)" />
         <param name="tra3d" value="$(arg tra3d)" />
         <param name="result_path" value="$(arg result_path)" />
+        <param name="smooth" value="$(arg smooth)"/>
+        <param name="stride" value="$(arg stride)"/>
     </node>
 </launch>

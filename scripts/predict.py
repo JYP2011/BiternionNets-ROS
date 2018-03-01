@@ -61,14 +61,14 @@ class Predictor(object):
             self.results_file_orig.close()
 
         self.counter = 0
-        self.smoother_dict = defaultdict(lambda: GHFilter(g=0.5))
+        self.smoother_dict = defaultdict(lambda: GHFilter(g=0.5)) if rospy.get_param("~smooth", False) else None
+        self.stride = rospy.get_param("~stride", 1)
+
         # for timing
         self.cycle_idx = 0
         self.hz_curr = 0.0
         self.hz_sum = 0.0
         self.hz_mean = 0.0
-
-        self.free_flight_step = 2
 
         modelname = rospy.get_param("~model", "head_50_50")
         weightsname = abspath(expanduser(rospy.get_param("~weights", ".")))
@@ -142,7 +142,7 @@ class Predictor(object):
         d = bridge.imgmsg_to_cv2(d)
         imgs = []
 
-        is_freeflight_cycle = (self.cycle_idx % self.free_flight_step) != 0
+        is_freeflight_cycle = (self.cycle_idx % self.stride) != 0
         if not is_freeflight_cycle:
             for detrect in detrects:
                 detrect = self.getrect(*detrect)
@@ -171,14 +171,24 @@ class Predictor(object):
         smoothed_confs = {}
         old_biternions = {}
         old_confs = {}
-        for t_id, biternion in zip(t_ids, preds_bit):
-            if is_freeflight_cycle and t_id not in self.smoother_dict:
-                continue   # Don't start a new smoother when I don't have a value.
-            if t_id in self.smoother_dict:  # For visualization only, get the previous smooth value.
-                insert_each(t_id, self.smoother_dict[t_id].get(), old_biternions, old_confs)
-            smoother = self.smoother_dict[t_id]
-            smoother.tick(dt, biternion, conf=None)
-            insert_each(t_id, smoother.get(), smoothed_biternions, smoothed_confs)
+        if self.smoother_dict is not None:
+            for t_id, biternion in zip(t_ids, preds_bit):
+                if is_freeflight_cycle and t_id not in self.smoother_dict:
+                    continue   # Don't start a new smoother when I don't have a value.
+                if t_id in self.smoother_dict:  # For visualization only, get the previous smooth value.
+                    insert_each(t_id, self.smoother_dict[t_id].get(), old_biternions, old_confs)
+                smoother = self.smoother_dict[t_id]
+                smoother.tick(dt, biternion, conf=None)
+                insert_each(t_id, smoother.get(), smoothed_biternions, smoothed_confs)
+
+            # publish smoothed
+            if 0 < self.pub_smooth.get_num_connections():
+                self.pub_smooth.publish(HeadOrientations(
+                    header=header,
+                    angles=[bit2deg(a) for a in smoothed_angles],
+                    confidences=list(smoothed_confs),
+                    ids = list(t_ids)
+                ))
 
         # published unsmoothed
         if 0 < self.pub.get_num_connections():
@@ -187,15 +197,6 @@ class Predictor(object):
                 angles=[bit2deg(a) for a in preds_bit],
                 confidences=[0.83] * len(imgs),
                 ids=list(t_ids)
-            ))
-
-        # publish smoothed
-        if 0 < self.pub_smooth.get_num_connections():
-            self.pub_smooth.publish(HeadOrientations(
-                header=header,
-                angles=[bit2deg(a) for a in smoothed_angles],
-                confidences=list(smoothed_confs),
-                ids = list(t_ids)
             ))
 
         # TIMING END
