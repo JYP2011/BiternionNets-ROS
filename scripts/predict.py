@@ -197,8 +197,8 @@ class Predictor(object):
         if 0 < self.pub.get_num_connections():
             self.pub.publish(HeadOrientations(
                 header=header,
-                angles=[bit2deg(a) for a in preds_bit],
-                confidences=[0.83] * len(imgs),
+                angles=[bit2deg(a) for a in preds_bit] if not is_freeflight_cycle else [],
+                confidences=[0.83] * len(imgs) if not is_freeflight_cycle else [],
                 ids=list(t_ids)
             ))
 
