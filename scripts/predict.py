@@ -60,7 +60,8 @@ class Predictor(object):
             self.results_file_smoothed.close()
             self.results_file_orig.close()
 
-        self.counter = 0
+        self.seen_counter = 0
+        self.ana_counter = 0
         self.smoother_dict = defaultdict(lambda: GHFilter(g=0.5)) if rospy.get_param("~smooth", False) else None
         self.stride = rospy.get_param("~stride", 1)
 
@@ -135,6 +136,7 @@ class Predictor(object):
 
         detrects = get_rects(src)
         t_ids = [(p2d.track_id) for p2d in src.boxes]
+        self.seen_counter += len(t_ids)
 
         header = rgb.header
         bridge = CvBridge()
@@ -154,7 +156,7 @@ class Predictor(object):
                 im = self.preproc(im)
                 imgs.append(im)
                 #sys.stderr.write("\r{}".format(self.counter)) ; sys.stderr.flush()
-                self.counter += 1
+                self.ana_counter += 1
 
             # TODO: We could further optimize by putting all augmentations in a
             #       single batch and doing only one forward pass. Should be easy.
@@ -165,7 +167,7 @@ class Predictor(object):
                 preds_bit = []
         else:
             preds_bit = [None] * len(t_ids)  # Note: this will take care of correct filtering below.
-        
+
         # SMOOTHING
         smoothed_biternions = {}
         smoothed_confs = {}
@@ -254,6 +256,6 @@ if __name__ == "__main__":
 
     p = Predictor()
     rospy.spin()
-    rospy.loginfo("Predicted a total of {} heads.".format(p.counter))
+    rospy.loginfo("Analyzed a total of {} heads, out of {} seen heads.".format(p.ana_counter, p.seen_counter))
     rospy.loginfo("Mean HZ: {}".format(p.hz_mean))
     rospy.loginfo("Time travel problems: {}".format(p.time_travels))
