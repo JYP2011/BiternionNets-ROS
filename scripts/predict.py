@@ -20,24 +20,16 @@ from sensor_msgs.msg import Image as ROSImage, CameraInfo
 from geometry_msgs.msg import PoseArray, Pose, Point, Quaternion, QuaternionStamped
 from biternion.msg import HeadOrientations
 from visualization_msgs.msg import Marker
-
-import DeepFried2 as df
-
-from common import bit2deg as _bit2deg, ensemble_biternions, subtractbg, cutout
-
+from common import deg2bit
 from general_smoother.smoother2 import *
-
-def bit2deg(bit):
-    return _bit2deg(np.array([bit]))[0] - 90
-
 
 # Distinguish between STRANDS and SPENCER.
 try:
     from rwth_perception_people_msgs.msg import UpperBodyDetector
-    from spencer_tracking_msgs.msg import TrackedPersons2d, TrackedPersons
+    from spencer_tracking_msgs.msg import TrackedPersons2d
 except ImportError:
     from upper_body_detector.msg import UpperBodyDetector
-    from mdl_people_tracker.msg import TrackedPersons2d, TrackedPersons
+    from mdl_people_tracker.msg import TrackedPersons2d
 
 
 def get_rects(msg, with_depth=False):
@@ -81,7 +73,6 @@ class Predictor(object):
         self.pub_smooth = rospy.Publisher(topic + "_smoothed", HeadOrientations, queue_size=3)
         self.pub_vis = rospy.Publisher(topic + '/image', ROSImage, queue_size=3)
         self.pub_pa = rospy.Publisher(topic + "/pose", PoseArray, queue_size=3)
-        self.pub_tracks = rospy.Publisher(topic + "/tracks", TrackedPersons, queue_size=3)
 
         # Ugly workaround for "jumps back in time" that the synchronizer sometime does.
         self.last_stamp = rospy.Time.now()
@@ -89,18 +80,11 @@ class Predictor(object):
 
         # Create and load the network.
         netlib = import_module(modelname)
-        self.net = netlib.mknet()
-        self.net.__setstate__(np.load(weightsname))
-        self.net.evaluate()
+        self.model = netlib.Model(weightsname, GPU=False)
 
-        self.aug = netlib.mkaug(None, None)
-        self.preproc = netlib.preproc
-        self.getrect = netlib.getrect
-
-        # Do a fake forward-pass for precompilation.
-        im = cutout(np.zeros((480,640,3), np.uint8), 0, 0, 150, 450)
-        im = next(self.aug.augimg_pred(self.preproc(im), fast=True))
-        self.net.forward(np.array([im]))
+        # Do a fake forward-pass for precompilation/GPU init/...
+        self.model(np.zeros((480,640,3), np.uint8),
+                   np.zeros((480,640), np.float32), [(0,0,150,450)])
         rospy.loginfo("BiternionNet initialized")
 
         src = rospy.get_param("~src", "tra")
@@ -141,31 +125,15 @@ class Predictor(object):
 
         header = rgb.header
         bridge = CvBridge()
-        rgb = bridge.imgmsg_to_cv2(rgb)[:,:,::-1]  # Need to do BGR-RGB conversion manually.
+        rgb = bridge.imgmsg_to_cv2(rgb, desired_encoding='rgb8')
         d = bridge.imgmsg_to_cv2(d)
-        imgs = []
 
         is_freeflight_cycle = (self.cycle_idx % self.stride) != 0
         if not is_freeflight_cycle:
-            for detrect in detrects:
-                detrect = self.getrect(*detrect)
-                det_rgb = cutout(rgb, *detrect)
-                det_d = cutout(d, *detrect)
-
-                # Preprocess and stick into the minibatch.
-                im = subtractbg(det_rgb, det_d, 1.0, 0.5)
-                im = self.preproc(im)
-                imgs.append(im)
-                #sys.stderr.write("\r{}".format(self.counter)) ; sys.stderr.flush()
-                self.ana_counter += 1
-
-            # TODO: We could further optimize by putting all augmentations in a
-            #       single batch and doing only one forward pass. Should be easy.
-            if len(detrects):
-                bits = [self.net.forward(batch) for batch in self.aug.augbatch_pred(np.array(imgs), fast=True)]
-                preds_bit = ensemble_biternions(bits)
-            else:
-                preds_bit = []
+            # Do the extraction and prediction
+            preds_deg, confs = self.model(rgb, d, detrects)
+            preds_bit = deg2bit(preds_deg)
+            self.ana_counter += len(preds_bit)
         else:
             preds_bit = [None] * len(t_ids)  # Note: this will take care of correct filtering below.
 
@@ -197,8 +165,8 @@ class Predictor(object):
         if 0 < self.pub.get_num_connections():
             self.pub.publish(HeadOrientations(
                 header=header,
-                angles=[bit2deg(a) for a in preds_bit] if not is_freeflight_cycle else [],
-                confidences=[0.83] * len(imgs) if not is_freeflight_cycle else [],
+                angles=list(preds_deg) if not is_freeflight_cycle else [],
+                confidences=list(confs) if not is_freeflight_cycle else [],
                 ids=list(t_ids)
             ))
 
@@ -221,10 +189,11 @@ class Predictor(object):
                         f_o.write("{0:d} {1:d} {2:.2f} {3:.2f}\n".format(src.frame_idx, t_id, bit2deg(bit), 0.83))
 
         # Visualization
+        # TODO: Visualize confidence, too.
         if 0 < self.pub_vis.get_num_connections():
-            rgb_vis = rgb[:,:,::-1].copy()
+            rgb_vis = rgb.copy()
             for detrect, t_id, alpha in zip(detrects, t_ids, preds_bit):
-                l, t, w, h = self.getrect(*detrect)
+                l, t, w, h = self.model.getrect(*detrect)
                 cv2.rectangle(rgb_vis, (detrect[0], detrect[1]), (detrect[0]+detrect[2],detrect[1]+detrect[3]), (0,255,255), 1)
                 cv2.rectangle(rgb_vis, (l,t), (l+w,t+h), (0,255,0), 2)
 
