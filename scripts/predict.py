@@ -20,7 +20,7 @@ from sensor_msgs.msg import Image as ROSImage, CameraInfo
 from geometry_msgs.msg import PoseArray, Pose, Point, Quaternion, QuaternionStamped
 from biternion.msg import HeadOrientations
 from visualization_msgs.msg import Marker
-from common import deg2bit
+from common import deg2bit, bit2deg
 from general_smoother.smoother2 import *
 
 # Distinguish between STRANDS and SPENCER.
@@ -131,7 +131,7 @@ class Predictor(object):
         is_freeflight_cycle = (self.cycle_idx % self.stride) != 0
         if not is_freeflight_cycle:
             # Do the extraction and prediction
-            preds_deg, confs = self.model(rgb, d, detrects)
+            preds_deg, preds_confs = self.model(rgb, d, detrects)
             preds_bit = deg2bit(preds_deg)
             self.ana_counter += len(preds_bit)
         else:
@@ -166,7 +166,7 @@ class Predictor(object):
             self.pub.publish(HeadOrientations(
                 header=header,
                 angles=list(preds_deg) if not is_freeflight_cycle else [],
-                confidences=list(confs) if not is_freeflight_cycle else [],
+                confidences=list(preds_confs) if not is_freeflight_cycle else [],
                 ids=list(t_ids)
             ))
 
@@ -185,8 +185,8 @@ class Predictor(object):
 
             if not is_freeflight_cycle:
                 with open(self.results_file_orig.name,'a') as f_o:
-                    for t_id, bit in zip(t_ids, preds_bit):
-                        f_o.write("{0:d} {1:d} {2:.2f} {3:.2f}\n".format(src.frame_idx, t_id, bit2deg(bit), 0.83))
+                    for t_id, bit, conf in zip(t_ids, preds_bit, preds_confs):
+                        f_o.write("{0:d} {1:d} {2:.2f} {3:.2f}\n".format(src.frame_idx, t_id, bit2deg(bit), conf))
 
         # Visualization
         # TODO: Visualize confidence, too.
