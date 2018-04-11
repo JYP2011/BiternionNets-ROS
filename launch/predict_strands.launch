@@ -1,14 +1,20 @@
 <launch>
     <!-- The model name corresponds to the name of the *.py files in the "models" subdirectory, without the extension. -->
-    <arg name="model" default="head_50_50" />
+    <arg name="model" default="v2_head_80_50" />
     <!-- Full path (can use `~`) to the weights file corresponding to the model. -->
-    <arg name="weights" default="$(find biternion)/models/head_50_50.npz" />
+    <arg name="weights" default="$(find biternion)/models/v2_head_80_50.pth" />
     <arg name="tra" default="/mdl_people_tracker/tracked_persons_2d" />
     <arg name="ubd" default="/upper_body_detector/detections" />
     <arg name="src" default="tra" />
     <arg name="rgb" default="/head_xtion/rgb/image_raw" />
     <arg name="d" default="/head_xtion/depth_registered/image_raw"/>
     <arg name="topic" default="/head_orientations" />
+
+    <!-- Smoother and free-flight settings -->
+    <arg name="result_path" default="/tmp/" />
+    <arg name="filter" default="GHFilter(g=0.5)"/>
+    <arg name="smooth" default="true"/>
+    <arg name="stride" default="2"/>
 
     <node pkg="biternion" type="predict.py" name="biternion_predict" output="screen" respawn="false">
         <param name="model" value="$(arg model)" />
@@ -19,6 +25,9 @@
         <param name="rgb" value="$(arg rgb)" />
         <param name="d" value="$(arg d)" />
         <param name="topic" value="$(arg topic)" />
-        <param name="tra3d" value="" />
+        <param name="result_path" value="$(arg result_path)" />
+        <param name="smooth" value="$(arg smooth)"/>
+        <param name="stride" value="$(arg stride)"/>
+        <param name="filter" value="$(arg filter)"/>
     </node>
 </launch>
